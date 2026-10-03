@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fluid Tilt</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a101f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fluid Tilt">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #e9f1ff;
+    --bg-top: #e9f1ff;
+    --bg-bottom: #c9d9f5;
+    --panel: rgba(255,255,255,0.92);
+    --text: #10203f;
+    --muted: #54688f;
+    --accent: #2f6bff;
+    --border: rgba(16,32,63,0.15);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0a101f; --bg-top: #0a101f; --bg-bottom: #141e3a;
+      --panel: rgba(16,24,44,0.92); --text: #e8f0ff; --muted: #9db0d6;
+      --accent: #4d86ff; --border: rgba(255,255,255,0.14);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0a101f; --bg-top: #0a101f; --bg-bottom: #141e3a;
+    --panel: rgba(16,24,44,0.92); --text: #e8f0ff; --muted: #9db0d6;
+    --accent: #4d86ff; --border: rgba(255,255,255,0.14);
+  }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--text);
+         -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  canvas#c { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+
+  .hud { position: fixed; left: 0; right: 0; bottom: 0; padding: 8px 14px calc(env(safe-area-inset-bottom, 0px) + 10px);
+         font-size: 12px; color: var(--muted); pointer-events: none; text-align: center; }
+  .btn { font: inherit; border: 1px solid var(--border); background: var(--panel); color: var(--text);
+         border-radius: 12px; padding: 10px 14px; cursor: pointer; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+  .gear { position: fixed; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 12px); width: 44px; height: 44px;
+          padding: 0; font-size: 20px; line-height: 1; }
+  .panel { position: fixed; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 64px); width: min(300px, calc(100% - 24px));
+           background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 14px;
+           display: none; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .panel.open { display: block; }
+  .row { margin-bottom: 10px; font-size: 13px; }
+  .row label { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .row output { color: var(--muted); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btns .btn { flex: 1 1 auto; padding: 9px 10px; font-size: 13px; }
+
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px;
+             background: rgba(5,10,25,0.55); }
+  .card { max-width: 340px; background: var(--panel); border: 1px solid var(--border); border-radius: 20px;
+          padding: 22px; text-align: center; }
+  .card h1 { margin: 0 0 6px; font-size: 22px; }
+  .card p { margin: 6px 0 14px; font-size: 14px; line-height: 1.45; color: var(--muted); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud" id="hud"></div>
+
+<button class="btn gear" id="gear" aria-label="Settings">&#9881;</button>
+<div class="panel" id="panel">
+  <div class="row"><label>Fluid density <output id="o-dens"></output></label>
+    <input type="range" id="s-dens" min="500" max="3000" step="50"></div>
+  <div class="row"><label>Stiffness (pressure) <output id="o-stiff"></output></label>
+    <input type="range" id="s-stiff" min="0.3" max="1.5" step="0.05"></div>
+  <div class="row"><label>Viscosity <output id="o-visc"></output></label>
+    <input type="range" id="s-visc" min="0" max="0.4" step="0.01"></div>
+  <div class="row"><label>Cohesion <output id="o-coh"></output></label>
+    <input type="range" id="s-coh" min="0" max="1" step="0.05"></div>
+  <div class="row"><label>Gravity (screens/s&sup2;) <output id="o-grav"></output></label>
+    <input type="range" id="s-grav" min="0.5" max="4" step="0.1"></div>
+  <div class="btns">
+    <button class="btn" id="b-flip">Flip tilt</button>
+    <button class="btn" id="b-reset">Reset fluid</button>
+  </div>
+</div>
+
+<div class="overlay" id="start">
+  <div class="card">
+    <h1>Fluid Tilt</h1>
+    <p>A 2D particle fluid filling 40% of your screen, with 60% air. Tilt your phone to slosh it around.</p>
+    <button class="btn primary" id="b-start">Start</button>
+    <p style="margin-top:14px;font-size:12px">Tap Start to allow motion sensors. If sensors are unavailable, drag your finger and the water is pulled toward it.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ======================================================================================
+ *  FLUID TILT - Double Density Relaxation particle fluid (Clavet et al. 2005)
+ *  Same algorithm and constants as the Kotlin/Android version.
+ *  Units: CSS pixels. Everything derives from the window size, so any screen works.
+ * ====================================================================================== */
+
+// ----------------------------- TUNABLE CONSTANTS -----------------------------
+const WATER_RATIO = 0.40;            // 40% of the screen area is water, 60% is air
+const REFERENCE_DENSITY = 1000;      // density treated as "weight factor 1" (water)
+const TARGET_PARTICLE_COUNT = 900;   // more = finer, slower (900 suits mid-range phones)
+const KERNEL_RADIUS_FACTOR = 2.2;    // interaction radius / particle spacing
+const NEAR_STIFFNESS_RATIO = 1.5;    // near-pressure stiffness = stiffness * this (anti-clumping)
+const FIXED_DT = 1 / 120;            // physics step (s)
+const MAX_STEPS = 3;                 // max steps per rendered frame
+const MAX_FRAME_DT = 0.05;           // clamp for long frames
+const MAX_CORRECTION = 0.25;         // per-pair position correction cap (fraction of spacing)
+const SENSOR_SMOOTHING = 0.12;       // low-pass filter factor (smaller = smoother)
+
+/* Live-tunable (also via the settings panel).
+ *  density     : FLUID_DENSITY. Weight factor w = density * densityFactor / 1000.
+ *                gravity, pressure stiffness and cohesion all scale with w.
+ *  densityFactor: extra multiplier on density (1.0 = unchanged)
+ *  gravity     : screen heights per second^2 at full tilt
+ *  stiffness   : pressure stiffness (dimensionless)
+ *  viscosity   : damps approaching neighbour velocity (0 = watery, 0.3 = syrupy)
+ *  cohesion    : scales attractive (negative) pressure = surface tension (0..1)
+ *  damping     : air drag per second
+ *  restitution : wall bounce (0 inelastic .. 1 elastic)
+ *  wallFriction: tangential velocity loss at walls
+ */
+const CFG = { density: 1000, densityFactor: 1, gravity: 2.0, stiffness: 0.8, viscosity: 0.08,
+              cohesion: 0.35, damping: 0.15, restitution: 0.25, wallFriction: 0.05 };
+
+// ----- Rendering -----
+const RENDER_SCALE = 0.5;            // offscreen bitmap scale
+const MAX_BITMAP_PIXELS = 110000;    // cap for big screens
+const SPRITE_RADIUS_FACTOR = 1.35;   // blob radius / particle spacing
+const SHADE_LEVELS = 8;              // speed colour buckets
+const SHADE_SPEED_SCREENS = 1.2;     // screens/s that give the lightest colour
+const THRESH = 0.40;                 // metaball alpha threshold
+const SHARP = 6;                     // metaball edge sharpness
+const COLOR_SLOW = [0x15, 0x4B, 0xFF];
+const COLOR_FAST = [0x8A, 0xE0, 0xFF];
+
+// --------------------------------- DOM ---------------------------------
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const off = document.createElement('canvas');
+const octx = off.getContext('2d', { willReadFrequently: true });
+const hud = document.getElementById('hud');
+
+// --------------------------------- state ---------------------------------
+let W = 0, H = 0, dpr = 1, n = 0;
+let px, py, vx, vy, prx, pry;
+let spacing = 1, radius = 0.5, kernelH = 1, kernelH2 = 1, invH = 1;
+let rho0 = 1, rhoN0 = 1, gravityPx = 0, kEff = 0, kNearEff = 0, cohEff = 0;
+let gridCols = 1, gridRows = 1, cellHead = new Int32Array(0), cellNext = new Int32Array(0);
+let gDirX = 0, gDirY = 1;            // smoothed gravity direction (screen coords, y down)
+let sprites = [], spriteHalf = 1, bgGrad = null;
+let flipTilt = false, sensorSeen = false, running = false;
+let last = 0, acc = 0, fpsEMA = 60, hudTimer = 0;
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+const MAXN = 96;                     // neighbour scratch buffers (no per-frame allocation)
+const nbJ = new Int32Array(MAXN), nbDX = new Float32Array(MAXN), nbDY = new Float32Array(MAXN), nbR = new Float32Array(MAXN);
+
+// --------------------------------- setup ---------------------------------
+function createParticles() {
+  const area = W * H * WATER_RATIO;
+  const ideal = Math.sqrt(area / TARGET_PARTICLE_COUNT);
+  const cols = Math.max(1, Math.floor(W / ideal));
+  const rows = Math.max(1, Math.ceil(TARGET_PARTICLE_COUNT / cols));
+  n = cols * rows;
+  px = new Float32Array(n); py = new Float32Array(n);
+  vx = new Float32Array(n); vy = new Float32Array(n);
+  prx = new Float32Array(n); pry = new Float32Array(n);
+  cellNext = new Int32Array(n);
+  const cw = W / cols, ch = (H * WATER_RATIO) / rows;   // block covers exactly W x (0.4 H)
+  let k = 0;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    px[k] = (c + 0.5) * cw + (Math.random() - 0.5) * 0.02 * cw;
+    py[k] = H - (r + 0.5) * ch + (Math.random() - 0.5) * 0.02 * ch;
+    k++;
+  }
+}
+
+function configureGeometry() {
+  // n * spacing^2 == WATER_RATIO * W * H   <- this is the 40:60 water/air constraint
+  spacing = Math.sqrt(W * H * WATER_RATIO / n);
+  radius = spacing * 0.5;
+  kernelH = spacing * KERNEL_RADIUS_FACTOR;
+  kernelH2 = kernelH * kernelH;
+  invH = 1 / kernelH;
+  let d = 0, dn = 0;                    // rest densities from a perfect square lattice
+  for (let a = -4; a <= 4; a++) for (let b = -4; b <= 4; b++) {
+    if (a === 0 && b === 0) continue;
+    const r = spacing * Math.sqrt(a * a + b * b);
+    if (r < kernelH) { const q = 1 - r / kernelH; d += q * q; dn += q * q * q; }
+  }
+  rho0 = d; rhoN0 = dn;
+  gridCols = Math.ceil(W * invH) + 2;
+  gridRows = Math.ceil(H * invH) + 2;
+  cellHead = new Int32Array(gridCols * gridRows);
+}
+
+function applyPhysics() {
+  const w = CFG.density * CFG.densityFactor / REFERENCE_DENSITY;
+  gravityPx = CFG.gravity * H * w;                                   // heavier = pulled harder
+  kEff = Math.min(CFG.stiffness * w, 2.0);                           // heavier = stiffer
+  kNearEff = Math.min(CFG.stiffness * NEAR_STIFFNESS_RATIO * w, 3.0);
+  cohEff = Math.min(Math.max(CFG.cohesion * w, 0), 1);               // heavier = clingier
+}
+
+function buildSprites(scale) {
+  const rPx = Math.max(2, spacing * SPRITE_RADIUS_FACTOR * scale);
+  const size = Math.ceil(rPx * 2) + 2, c = size / 2;
+  spriteHalf = c;
+  sprites = [];
+  for (let k = 0; k < SHADE_LEVELS; k++) {
+    const t = k / (SHADE_LEVELS - 1);
+    const r = Math.round(COLOR_SLOW[0] + (COLOR_FAST[0] - COLOR_SLOW[0]) * t);
+    const g = Math.round(COLOR_SLOW[1] + (COLOR_FAST[1] - COLOR_SLOW[1]) * t);
+    const b = Math.round(COLOR_SLOW[2] + (COLOR_FAST[2] - COLOR_SLOW[2]) * t);
+    const s = document.createElement('canvas'); s.width = size; s.height = size;
+    const sc = s.getContext('2d');
+    const gr = sc.createRadialGradient(c, c, 0, c, c, rPx);
+    gr.addColorStop(0, `rgba(${r},${g},${b},1)`);
+    gr.addColorStop(0.45, `rgba(${r},${g},${b},0.745)`);
+    gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    sc.fillStyle = gr; sc.beginPath(); sc.arc(c, c, rPx, 0, Math.PI * 2); sc.fill();
+    sprites.push(s);
+  }
+}
+
+function readTheme() {
+  const cs = getComputedStyle(document.documentElement);
+  const top = cs.getPropertyValue('--bg-top').trim() || '#0a101f';
+  const bot = cs.getPropertyValue('--bg-bottom').trim() || '#141e3a';
+  bgGrad = ctx.createLinearGradient(0, 0, 0, cv.height);
+  bgGrad.addColorStop(0, top); bgGrad.addColorStop(1, bot);
+}
+
+let bmpScale = RENDER_SCALE;
+function resize() {
+  const nw = Math.max(1, window.innerWidth), nh = Math.max(1, window.innerHeight);
+  const pw = W, ph = H;
+  W = nw; H = nh;
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  if (n === 0) createParticles();
+  else if (pw > 0 && ph > 0) {          // keep the fluid, stretch to the new bounds
+    const kx = W / pw, ky = H / ph;
+    for (let i = 0; i < n; i++) { px[i] *= kx; py[i] *= ky; vx[i] = 0; vy[i] = 0; }
+  }
+  configureGeometry();
+  applyPhysics();
+  bmpScale = Math.min(RENDER_SCALE, Math.sqrt(MAX_BITMAP_PIXELS / (W * H)));
+  off.width = Math.max(1, Math.round(W * bmpScale));
+  off.height = Math.max(1, Math.round(H * bmpScale));
+  buildSprites(bmpScale);
+  readTheme();
+}
+
+// --------------------------------- physics ---------------------------------
+const cellX = x => { const c = (x * invH) | 0; return c < 0 ? 0 : (c >= gridCols ? gridCols - 1 : c); };
+const cellY = y => { const c = (y * invH) | 0; return c < 0 ? 0 : (c >= gridRows ? gridRows - 1 : c); };
+
+function buildGrid() {
+  cellHead.fill(-1);
+  for (let i = 0; i < n; i++) {
+    const c = cellY(py[i]) * gridCols + cellX(px[i]);
+    cellNext[i] = cellHead[c];
+    cellHead[c] = i;
+  }
+}
+
+// Fills nbJ/nbDX/nbDY/nbR with neighbours of i within the kernel radius; returns the count.
+function gather(i) {
+  let c = 0;
+  const xi = px[i], yi = py[i], cx = cellX(xi), cy = cellY(yi);
+  const x0 = Math.max(cx - 1, 0), x1 = Math.min(cx + 1, gridCols - 1);
+  const y0 = Math.max(cy - 1, 0), y1 = Math.min(cy + 1, gridRows - 1);
+  for (let gy = y0; gy <= y1; gy++) {
+    const rb = gy * gridCols;
+    for (let gx = x0; gx <= x1; gx++) {
+      let j = cellHead[rb + gx];
+      while (j !== -1) {
+        if (j !== i) {
+          const dx = px[j] - xi, dy = py[j] - yi, r2 = dx * dx + dy * dy;
+          if (r2 < kernelH2 && c < MAXN) { nbJ[c] = j; nbDX[c] = dx; nbDY[c] = dy; nbR[c] = Math.sqrt(r2); c++; }
+        }
+        j = cellNext[j];
+      }
+    }
+  }
+  return c;
+}
+
+function step(dt) {
+  const gx = gDirX * gravityPx, gy = gDirY * gravityPx;
+  const maxSpeed = spacing / dt;                      // <= one spacing per step => no tunnelling
+  const drag = Math.max(0, 1 - CFG.damping * dt);
+  const visc = CFG.viscosity;
+
+  // 1) gravity (sensor driven) + damping + speed cap
+  for (let i = 0; i < n; i++) {
+    let a = (vx[i] + gx * dt) * drag, b = (vy[i] + gy * dt) * drag;
+    const s = Math.sqrt(a * a + b * b);
+    if (s > maxSpeed) { const k = maxSpeed / s; a *= k; b *= k; }
+    vx[i] = a; vy[i] = b;
+  }
+
+  // 2) viscosity: damp the approaching part of the relative velocity
+  buildGrid();
+  for (let i = 0; i < n; i++) {
+    const c = gather(i);
+    for (let k = 0; k < c; k++) {
+      const j = nbJ[k]; if (j <= i) continue;
+      const r = nbR[k]; if (r < 1e-4) continue;
+      const nx = nbDX[k] / r, ny = nbDY[k] / r;
+      const u = (vx[i] - vx[j]) * nx + (vy[i] - vy[j]) * ny;
+      if (u > 0) {
+        const imp = 0.5 * visc * (1 - r * invH) * u;
+        vx[i] -= imp * nx; vy[i] -= imp * ny;
+        vx[j] += imp * nx; vy[j] += imp * ny;
+      }
+    }
+  }
+
+  // 3) advance positions
+  for (let i = 0; i < n; i++) {
+    prx[i] = px[i]; pry[i] = py[i];
+    px[i] += vx[i] * dt; py[i] += vy[i] * dt;
+  }
+
+  // 4) double density relaxation: pressure + near-pressure (incompressibility, cohesion)
+  buildGrid();
+  const maxCorr = MAX_CORRECTION * spacing;
+  for (let i = 0; i < n; i++) {
+    const c = gather(i);
+    let rho = 0, rhoN = 0;
+    for (let k = 0; k < c; k++) { const q = 1 - nbR[k] * invH; rho += q * q; rhoN += q * q * q; }
+    let p = kEff * (rho - rho0) / rho0;
+    let pN = kNearEff * (rhoN - rhoN0) / rhoN0;
+    if (p < 0) p *= cohEff;               // negative pressure = attraction = surface tension
+    if (pN < 0) pN *= cohEff;
+    let dX = 0, dY = 0;
+    for (let k = 0; k < c; k++) {
+      const r = nbR[k]; if (r < 1e-4) continue;
+      const q = 1 - r * invH;
+      let d = (p * q + pN * q * q) * kernelH * 0.5;
+      d = d > maxCorr ? maxCorr : (d < -maxCorr ? -maxCorr : d);
+      const cx = nbDX[k] / r * d * 0.5, cy = nbDY[k] / r * d * 0.5;
+      const j = nbJ[k];
+      px[j] += cx; py[j] += cy;
+      dX -= cx; dY -= cy;
+    }
+    px[i] += dX; py[i] += dY;
+  }
+
+  // 5) velocity from displacement + hard clamp to the 4 outer screen edges
+  const minX = radius, maxX = W - radius, minY = radius, maxY = H - radius;
+  const restSpeed = 2 * Math.hypot(gx, gy) * dt + 1;
+  const keep = 1 - CFG.wallFriction, rest = CFG.restitution;
+  for (let i = 0; i < n; i++) {
+    let x = px[i], y = py[i];
+    let a = (x - prx[i]) / dt, b = (y - pry[i]) / dt;
+    if (x < minX)      { x = minX; a = a < -restSpeed ? -a * rest : 0; b *= keep; }
+    else if (x > maxX) { x = maxX; a = a > restSpeed ? -a * rest : 0; b *= keep; }
+    if (y < minY)      { y = minY; b = b < -restSpeed ? -b * rest : 0; a *= keep; }
+    else if (y > maxY) { y = maxY; b = b > restSpeed ? -b * rest : 0; a *= keep; }
+    px[i] = x; py[i] = y; vx[i] = a; vy[i] = b;
+  }
+}
+
+// --------------------------------- rendering ---------------------------------
+function render() {
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, cv.width, cv.height);
+
+  octx.clearRect(0, 0, off.width, off.height);
+  const sx = off.width / W, sy = off.height / H;
+  const maxShade = H * SHADE_SPEED_SCREENS;
+  for (let i = 0; i < n; i++) {
+    let lv = (Math.sqrt(vx[i] * vx[i] + vy[i] * vy[i]) / maxShade * (SHADE_LEVELS - 1)) | 0;
+    if (lv > SHADE_LEVELS - 1) lv = SHADE_LEVELS - 1;
+    octx.drawImage(sprites[lv], px[i] * sx - spriteHalf, py[i] * sy - spriteHalf);
+  }
+  // alpha threshold => crisp merging "metaball" surface
+  const img = octx.getImageData(0, 0, off.width, off.height), d = img.data;
+  for (let p = 3; p < d.length; p += 4) {
+    const a = d[p]; if (a === 0) continue;
+    const v = (a / 255 - THRESH) * SHARP;
+    d[p] = v <= 0 ? 0 : (v >= 1 ? 255 : (v * 255) | 0);
+  }
+  octx.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(off, 0, 0, cv.width, cv.height);
+}
+
+function frame(tms) {
+  if (!running) return;
+  requestAnimationFrame(frame);
+  const t = tms / 1000;
+  const dtF = last ? Math.min(t - last, MAX_FRAME_DT) : FIXED_DT;
+  last = t;
+  if (dtF > 0) fpsEMA += (1 / dtF - fpsEMA) * 0.05;
+  acc += dtF;
+  let steps = 0;
+  while (acc >= FIXED_DT && steps < MAX_STEPS) { step(FIXED_DT); acc -= FIXED_DT; steps++; }
+  if (steps === MAX_STEPS) acc = 0;
+  render();
+  hudTimer += dtF;
+  if (hudTimer > 0.5) {
+    hudTimer = 0;
+    const pct = n * spacing * spacing / (W * H) * 100;
+    const mode = sensorSeen ? ('gyro sensor' + tiltInfo)
+               : (noSensorHint ? 'NO SENSOR DATA - open this link directly in Chrome/Safari (not inside another app) and allow motion access; drag to tilt meanwhile' : 'waiting for sensor… drag to tilt');
+    hud.textContent = `${n} particles · water ${pct.toFixed(0)}% / air ${(100 - pct).toFixed(0)}% · ${fpsEMA.toFixed(0)} fps · ${mode}`;
+  }
+}
+
+// --------------------------------- sensors ---------------------------------
+function screenAngle() {
+  if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+  if (typeof window.orientation === 'number') return ((window.orientation % 360) + 360) % 360;
+  return 0;
+}
+
+function pushGravity(tx, ty) {
+  const m = Math.hypot(tx, ty);
+  if (m > 1) { tx /= m; ty /= m; }
+  gDirX += SENSOR_SMOOTHING * (tx - gDirX);     // exponential low-pass filter
+  gDirY += SENSOR_SMOOTHING * (ty - gDirY);
+}
+
+let sensorSrc = null;     // 'orientation' (gyro + accelerometer fusion, preferred) or 'motion' (raw accelerometer)
+let noSensorHint = false, tiltInfo = '';
+
+// "Up" reading in device axes (+x right, +y up in natural portrait), normalised to 1 g,
+// pointing AWAY from the ground -> screen gravity for the current screen rotation.
+function feedUpVector(sx, sy) {
+  if (flipTilt) { sx = -sx; sy = -sy; }
+  let ax, ay;
+  switch (screenAngle()) {
+    case 90:  ax = -sy; ay =  sx; break;
+    case 180: ax = -sx; ay = -sy; break;
+    case 270: ax =  sy; ay = -sx; break;
+    default:  ax =  sx; ay =  sy;
+  }
+  pushGravity(-ax, ay);                           // canvas coords (x right, y down), unit disc
+}
+
+// PREFERRED: deviceorientation = the OS's fused gyroscope + accelerometer attitude (beta/gamma).
+function onOrientation(e) {
+  if (e.beta == null || e.gamma == null) return;
+  sensorSeen = true; sensorSrc = 'orientation';
+  const b = e.beta * Math.PI / 180, g = e.gamma * Math.PI / 180;
+  // Gravity "up" vector in device axes derived from the Z-X'-Y'' Euler angles.
+  feedUpVector(-Math.sin(g) * Math.cos(b), Math.sin(b));
+  tiltInfo = ` · β ${e.beta.toFixed(0)}° γ ${e.gamma.toFixed(0)}°`;
+}
+
+// FALLBACK: raw accelerometer (only used if the device never reports orientation).
+function onMotion(e) {
+  if (sensorSrc === 'orientation') return;
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x == null || a.y == null) return;
+  sensorSeen = true; sensorSrc = 'motion';
+  let sx = a.x / 9.80665, sy = a.y / 9.80665;
+  if (IS_IOS) { sx = -sx; sy = -sy; }            // iOS reports the opposite sign to Android
+  feedUpVector(sx, sy);
+}
+
+async function enableMotion() {
+  // iOS needs explicit permission, requested directly from the tap (user gesture).
+  const reqs = [];
+  try { if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') reqs.push(DeviceOrientationEvent.requestPermission()); } catch (err) {}
+  try { if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') reqs.push(DeviceMotionEvent.requestPermission()); } catch (err) {}
+  try { await Promise.allSettled(reqs); } catch (err) {}
+  window.addEventListener('deviceorientation', onOrientation);
+  window.addEventListener('devicemotion', onMotion);
+  setTimeout(() => { if (!sensorSeen) noSensorHint = true; }, 2500);
+}
+
+// Fallback when no sensor exists (desktop / blocked): finger pulls the water toward it.
+let dragging = false;
+function pointerGravity(e) {
+  if (sensorSeen) return;
+  const dx = e.clientX - W / 2, dy = e.clientY - H / 2, m = Math.hypot(dx, dy);
+  if (m > 20) pushGravity(dx / m, dy / m);
+}
+cv.addEventListener('pointerdown', e => { dragging = true; pointerGravity(e); });
+cv.addEventListener('pointermove', e => { if (dragging) pointerGravity(e); });
+window.addEventListener('pointerup', () => { dragging = false; });
+
+// --------------------------------- UI ---------------------------------
+const $ = id => document.getElementById(id);
+function bindSlider(id, key, fmt) {
+  const s = $('s-' + id), o = $('o-' + id);
+  s.value = CFG[key]; o.textContent = fmt(CFG[key]);
+  s.addEventListener('input', () => { CFG[key] = parseFloat(s.value); o.textContent = fmt(CFG[key]); applyPhysics(); });
+}
+bindSlider('dens', 'density', v => v.toFixed(0));
+bindSlider('stiff', 'stiffness', v => v.toFixed(2));
+bindSlider('visc', 'viscosity', v => v.toFixed(2));
+bindSlider('coh', 'cohesion', v => v.toFixed(2));
+bindSlider('grav', 'gravity', v => v.toFixed(1));
+
+$('gear').addEventListener('click', () => $('panel').classList.toggle('open'));
+$('b-flip').addEventListener('click', () => { flipTilt = !flipTilt; $('b-flip').textContent = flipTilt ? 'Tilt: flipped' : 'Flip tilt'; });
+$('b-reset').addEventListener('click', () => { createParticles(); configureGeometry(); applyPhysics(); });
+$('b-start').addEventListener('click', async () => {
+  $('start').classList.add('hidden');
+  await enableMotion();
+  keepAwake();
+  running = true; last = 0; acc = 0;
+  requestAnimationFrame(frame);
+});
+
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 150));
+document.addEventListener('visibilitychange', () => {   // save battery when hidden
+  if (document.hidden) { running = false; return; }
+  const started = $('start').classList.contains('hidden');   // only resume after Start was tapped
+  if (started && !running) { running = true; last = 0; acc = 0; requestAnimationFrame(frame); }
+});
+// Keep the screen on while the simulation runs (supported by Chrome on Android).
+let wakeLock = null;
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && running) keepAwake(); });
+
+// Register the service worker so the app installs and opens offline.
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+const mq = window.matchMedia('(prefers-color-scheme: dark)');
+if (mq.addEventListener) mq.addEventListener('change', readTheme);
+
+resize();
+render();   // static first frame behind the Start card
+
+// Debug hook (used for automated physics testing; harmless in production)
+window.__fluid = { step, state: () => ({ n, W, H, px, py, vx, vy, spacing, radius }), setGravity: (x, y) => { gDirX = x; gDirY = y; }, resize };
+})();
+</script>
+</body>
+</html>
