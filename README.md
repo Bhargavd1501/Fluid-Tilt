@@ -2,7 +2,7 @@
 
 Real-time 2D fluid in the browser (no dependencies) that fills exactly 40% of the screen, leaving 60% air, and sloshes with your phone's gyro. It uses a double-density-relaxation particle solver (Clavet et al.) with a spatial grid, drawn as a blue metaball surface.
 
-**Live demo:** https://bhargavd1501.github.io/Fluid-test/
+**Live demo:** https://bhargavd1501.github.io/Fluid-tilt/
 
 - Tilt the phone to move the water (device orientation sensor, accelerometer fallback, drag-to-tilt if no sensor)
 - Fixed 40:60 water-to-air ratio at any screen size, aspect ratio or DPI
